@@ -28,8 +28,7 @@ my $app = Plack::Middleware::TypeScript->wrap(
     Plack::Middleware::Static->new( 
         path => qr{\.js$}, 
         root => '.'
-    ),
-    root => 't/test/'
+    )
 );
 
 test_psgi
