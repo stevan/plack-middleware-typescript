@@ -7,6 +7,19 @@ use Plack::Request;
 
 extends 'Plack::Middleware';
 
+has 'root' => (
+    is       => 'ro',    
+    isa      => 'Path::Class::Dir',
+    coerce   => 1,
+    required => 1
+);
+
+has 'path' => (
+    is       => 'ro',    
+    isa      => 'RegexpRef | CodeRef',
+    required => 1
+);
+
 has 'cache' => (
     traits  => [ 'Hash' ],
     is      => 'ro',
@@ -21,10 +34,17 @@ has 'cache' => (
 );
 
 sub call {
-    my $self = shift;
-    my $req  = Plack::Request->new( shift );
-    my $path = $req->path_info;
-    $path =~ s/^\///;
+    my $self    = shift;
+    my $req     = Plack::Request->new( shift );
+    my $path    = $req->path_info;
+    my $matcher = $self->path;
+
+    for ($path) {
+        my $matched = ref $self->path eq 'CODE' ? $matcher->( $_ ) : $_ =~ $matcher;
+        return unless $matched;
+    }
+
+    $path = $self->root->stringify . $path;
 
     if ( $self->is_javascript_file( $path ) ) {
         #warn "Got a JS file";
@@ -58,7 +78,7 @@ sub get_typescript_file_from_javascript_file {
     my ($self, $path) = @_;
     my $ts_file = $path;
     $ts_file =~ s/\.js$/\.ts/;
-    #warn $ts_file;
+    warn $ts_file;
     $ts_file;
 }
 
