@@ -3,6 +3,7 @@ use Moose;
 use MooseX::NonMoose;
 use MooseX::Types::Path::Class;
 
+use Capture::Tiny qw[ capture ];
 use Plack::Request;
 
 extends 'Plack::Middleware';
@@ -43,27 +44,30 @@ sub call {
         my $matched = ref $self->path eq 'CODE' ? $matcher->( $_ ) : $_ =~ $matcher;
         return unless $matched;
     }
-
     $path = $self->root->stringify . $path;
 
+    my $error;
+
     if ( $self->is_javascript_file( $path ) ) {
-        #warn "Got a JS file";
         if ( $self->does_equivalent_typescript_file_exist( $path ) ) {
-            #warn "Found a matching TS file";
             if ( $self->is_in_cache( $path ) ) {
-                #warn "We are in the cache";
                 if ( $self->mtime( $path ) ne $self->fetch_from_cache( $path ) ) {
-                    #warn "And we need a recompile";
-                    $self->compile_typescript_file_to_javascript( $path );
+                    $error = $self->compile_typescript_file_to_javascript( $path );
                 }
             }
             else {
-                #warn "We are not in the cache";
-                $self->add_to_cache( $path, $self->mtime( $path ) );
-                $self->compile_typescript_file_to_javascript( $path );
+                $error = $self->compile_typescript_file_to_javascript( $path );
             }    
         }
+    }
 
+    if ( $error ) {
+        $req->logger->({ level   => 'error', message => $error }) if $req->logger;
+        my $res = $req->new_response( 500 );
+        $res->body([ $error ]);
+        return $res->finalize;
+    } else {
+        $self->add_to_cache( $path, $self->mtime( $path ) );
     }
 
     $self->app->( $req->env );
@@ -78,7 +82,6 @@ sub get_typescript_file_from_javascript_file {
     my ($self, $path) = @_;
     my $ts_file = $path;
     $ts_file =~ s/\.js$/\.ts/;
-    warn $ts_file;
     $ts_file;
 }
 
@@ -95,9 +98,17 @@ sub mtime {
 sub compile_typescript_file_to_javascript {
     my ($self, $path) = @_;
 
-    #warn "Compiling $path ...";
+    my @cmd = ('tsc', '--out', $path, $self->get_typescript_file_from_javascript_file( $path ));
+    my ($stdout, $stderr, $exit) = capture { system( @cmd ) };
 
-    system( 'tsc', '--out', $path, $self->get_typescript_file_from_javascript_file( $path ) );
+    if ( $exit != 0 ) {
+        $stderr =~ s/\r\n/\n/g;
+        return "TypeScript compilation failed:\n" 
+            .  "CMD: " . (join ' ' => @cmd)
+            .  "ERR: " . $stderr;
+    }
+    
+    return;
 }
 
 1;
